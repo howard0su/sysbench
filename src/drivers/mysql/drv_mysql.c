@@ -958,6 +958,7 @@ db_error_t mysql_drv_query(db_conn_t *sb_conn, const char *query, size_t len,
 {
   db_mysql_conn_t *db_mysql_con;
   MYSQL *con;
+  int ret;
 
   if (args.dry_run)
     return DB_ERROR_NONE;
@@ -975,6 +976,7 @@ db_error_t mysql_drv_query(db_conn_t *sb_conn, const char *query, size_t len,
   if (SB_UNLIKELY(err != 0))
     return check_error(sb_conn, "mysql_drv_query()", query, &rs->counter);
 
+  do {
   /* Store results and get query type */
   MYSQL_RES *res = mysql_store_result(con);
   DEBUG("mysql_store_result(%p) = %p", con, res);
@@ -992,23 +994,32 @@ db_error_t mysql_drv_query(db_conn_t *sb_conn, const char *query, size_t len,
       }
       else
         rs->counter = SB_CNT_OTHER;
-
-      return DB_ERROR_NONE;
     }
+    else
+    {
+      return check_error(sb_conn, "mysql_store_result()", NULL, &rs->counter);
+    }
+  }
+  else
+  {
+    rs->counter = SB_CNT_READ;
+    rs->ptr = (void *)res;
 
-    return check_error(sb_conn, "mysql_store_result()", NULL, &rs->counter);
+    rs->nrows = mysql_num_rows(res);
+    DEBUG("mysql_num_rows(%p) = %u", res, (unsigned int) rs->nrows);
+
+    rs->nfields = mysql_num_fields(res);
+    DEBUG("mysql_num_fields(%p) = %u", res, (unsigned int) rs->nfields);
   }
 
-  rs->counter = SB_CNT_READ;
-  rs->ptr = (void *)res;
+  ret = mysql_next_result(con);
+  DEBUG("mysql_next_result(%p) = %u", con, ret);
+  } while(ret == 0);
 
-  rs->nrows = mysql_num_rows(res);
-  DEBUG("mysql_num_rows(%p) = %u", res, (unsigned int) rs->nrows);
-
-  rs->nfields = mysql_num_fields(res);
-  DEBUG("mysql_num_fields(%p) = %u", res, (unsigned int) rs->nfields);
-
-  return DB_ERROR_NONE;
+  if (ret == -1)
+    return DB_ERROR_NONE;
+  else
+    return ret;
 }
 
 
